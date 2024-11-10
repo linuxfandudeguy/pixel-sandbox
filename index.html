@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brush Effect Pixel Stacking</title>
+    <!-- Correct Tailwind CSS Link -->
+    <link href="./tailwind.min.css" rel="stylesheet">
+    <style>
+        body, html { margin: 0; height: 100%; }
+        canvas { display: block; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+    <!-- Controls Section at Top Right Corner -->
+    <div class="absolute top-5 right-5 p-4 bg-white rounded-lg shadow-lg z-10">
+        <div class="mb-4">
+            <label for="color-picker" class="block text-sm font-medium text-gray-700">Pick Pixel Color</label>
+            <input type="color" id="color-picker" value="#00bfff" class="mt-1 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full">
+        </div>
+        <div>
+            <label for="pixel-count" class="block text-sm font-medium text-gray-700">Pixels per Click</label>
+            <input type="number" id="pixel-count" value="3" min="1" max="100" class="mt-1 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full">
+        </div>
+    </div>
+
+    <!-- Pixi.js Canvas -->
+    <script src="./pixi.min.js"></script>
+    <script>
+        // Create a Pixi.js application
+        const app = new PIXI.Application({
+            width: window.innerWidth,
+            height: window.innerHeight,
+            backgroundColor: 0xeeeeee, // Light background
+        });
+        document.body.appendChild(app.view);
+
+        // Pixel class to handle individual pixel properties and stacking
+        class Pixel {
+            constructor(x, y, size, color) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.color = color;
+
+                // Random physics properties for each pixel
+                this.velocityX = Math.random() * 2 - 1;  // Random horizontal velocity
+                this.velocityY = Math.random() * 2 - 1;  // Slight random vertical velocity
+                this.accelerationY = 0.1;  // Gravity (mild effect)
+                this.elasticity = 0.7;  // Bounciness factor
+                this.friction = 0.99;  // Friction on surfaces
+            }
+
+            // Update physics properties and check for pixel collisions
+            update(pixels) {
+                // Apply gravity (downward acceleration)
+                this.velocityY += this.accelerationY;
+
+                // Update position based on velocity
+                this.x += this.velocityX;
+                this.y += this.velocityY;
+
+                // Apply friction to velocity
+                this.velocityX *= this.friction;
+                this.velocityY *= this.friction;
+
+                // Check for collisions with other pixels and resolve them
+                this.checkCollisions(pixels);
+
+                // Handle bounce with the floor (ground)
+                if (this.y + this.size > app.view.height) {
+                    this.y = app.view.height - this.size;
+                    this.velocityY *= -this.elasticity;  // Reverse vertical velocity and apply bounciness
+                }
+
+                // Handle bounce with the left and right walls
+                if (this.x - this.size < 0) {
+                    this.x = this.size;
+                    this.velocityX *= -this.elasticity;
+                }
+                if (this.x + this.size > app.view.width) {
+                    this.x = app.view.width - this.size;
+                    this.velocityX *= -this.elasticity;
+                }
+            }
+
+            // Check for collisions with other pixels
+            checkCollisions(pixels) {
+                for (const otherPixel of pixels) {
+                    if (otherPixel === this) continue;  // Skip self-check
+
+                    // Check if this pixel is overlapping with another pixel
+                    const dx = this.x - otherPixel.x;
+                    const dy = this.y - otherPixel.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // If the pixels are overlapping (within their sizes)
+                    if (distance < this.size) {
+                        // Resolve collision by stacking
+                        const angle = Math.atan2(dy, dx);
+                        const overlap = this.size - distance;
+
+                        // Push this pixel away from the other pixel to prevent overlap
+                        this.x += Math.cos(angle) * overlap;
+                        this.y += Math.sin(angle) * overlap;
+
+                        // Stop the vertical velocity to simulate stacking
+                        this.velocityY = 0;
+                        this.velocityX = 0;
+                    }
+                }
+            }
+
+            // Render the pixel using Pixi.js
+            render() {
+                this.graphic.x = this.x;
+                this.graphic.y = this.y;
+            }
+
+            // Create a graphical representation of the pixel
+            createGraphics() {
+                this.graphic = new PIXI.Graphics();
+                this.graphic.beginFill(PIXI.utils.string2hex(this.color));
+                this.graphic.drawRect(0, 0, this.size, this.size);  // Draw a square for the pixel
+                this.graphic.endFill();
+                app.stage.addChild(this.graphic);
+            }
+        }
+
+        // Color picker for the user to select the color of the pixels
+        let selectedColor = "#00bfff";  // Default color is light blue
+
+        document.getElementById('color-picker').addEventListener('input', (event) => {
+            selectedColor = event.target.value;  // Set the new selected color
+        });
+
+        // Get pixel count input field
+        let pixelsPerInterval = parseInt(document.getElementById('pixel-count').value);
+
+        // Update pixel count when the user changes the value
+        document.getElementById('pixel-count').addEventListener('input', (event) => {
+            pixelsPerInterval = parseInt(event.target.value);
+        });
+
+        // Create a list to hold all the pixels
+        const pixels = [];
+
+        // Function to create a new pixel
+        function createPixel(x, y, size, color) {
+            const pixel = new Pixel(x, y, size, color);
+            pixel.createGraphics();
+            pixels.push(pixel);
+            return pixel;
+        }
+
+        // Mouse interaction: Add new pixels when mouse is pressed
+        let mouseDown = false;
+        let lastMouseDownTime = 0;
+        const CREATE_INTERVAL_MS = 1;  // Time interval in milliseconds (controls rate of pixel generation)
+
+        // Event listener for mouse down (start creating pixels)
+        app.view.addEventListener('mousedown', (event) => {
+            mouseDown = true;
+            lastMouseDownTime = Date.now();  // Reset the timer
+            createPixelsAt(event.clientX, event.clientY);  // Create pixels at the mouse position
+        });
+
+        // Event listener for mouse up (stop creating pixels)
+        app.view.addEventListener('mouseup', () => {
+            mouseDown = false;
+        });
+
+        // Event listener for mouse move (continue creating pixels if mouse is down)
+        app.view.addEventListener('mousemove', (event) => {
+            if (mouseDown) {
+                createPixelsAt(event.clientX, event.clientY);
+            }
+        });
+
+        // Function to create pixels at a specific position with rate limiting
+        function createPixelsAt(x, y) {
+            const currentTime = Date.now();
+            const timeSinceLastPixel = currentTime - lastMouseDownTime;
+
+            // Only create pixels if enough time has passed since the last creation
+            if (timeSinceLastPixel >= CREATE_INTERVAL_MS) {
+                // Reset the timer
+                lastMouseDownTime = currentTime;
+
+                // Create the desired number of pixels per interval
+                for (let i = 0; i < pixelsPerInterval; i++) {
+                    createPixel(x + (Math.random() - 0.5) * 10, y + (Math.random() - 0.5) * 10, 10, selectedColor);
+                }
+            }
+        }
+
+        // Game loop to update and render the pixels
+        app.ticker.add(() => {
+            pixels.forEach((pixel) => {
+                pixel.update(pixels);  // Pass the list of all pixels to check for collisions
+                pixel.render();
+            });
+        });
+
+    </script>
+</body>
+</html>
